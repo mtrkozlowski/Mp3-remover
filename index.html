@@ -13,7 +13,8 @@
     :root{ --bg:#f3f4f7; --panel:#fff; --panel2:#eceef3; --line:#d5d9e2; --text:#1b1f27; --muted:#667085; --accent:#1a73e8; --cut:#d92d3f; --wave:#1e9d6b; }
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  html{overflow-x:hidden;-webkit-text-size-adjust:100%}
+  body{margin:0;overflow-x:hidden;max-width:100vw;background:var(--bg);color:var(--text);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
   .wrap{max-width:1100px;margin:0 auto;padding:16px}
   h1{font-size:18px;margin:0 0 12px;font-weight:600}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px}
@@ -28,7 +29,7 @@
   .time small{color:var(--muted);font-size:14px;font-weight:400}
   #drop{border:2px dashed var(--line);border-radius:10px;padding:40px 16px;text-align:center;color:var(--muted)}
   #drop.over{border-color:var(--accent);color:var(--text)}
-  #wavebox{position:relative;background:var(--panel2);border-radius:8px;overflow:hidden;touch-action:none}
+  #wavebox{position:relative;background:var(--panel2);border-radius:8px;overflow:hidden;touch-action:pan-y;-webkit-user-select:none;user-select:none}
   canvas{display:block;width:100%;height:220px;cursor:crosshair}
   #scroll{width:100%;margin:8px 0 0}
   label{color:var(--muted);font-size:13px}
@@ -37,13 +38,32 @@
   table{width:100%;border-collapse:collapse}
   td,th{padding:6px 4px;text-align:left;border-bottom:1px solid var(--line)}
   th{color:var(--muted);font-weight:500;font-size:13px}
-  tr.sel td{background:color-mix(in srgb,var(--cut) 14%,transparent)}
+  tr.sel{background:color-mix(in srgb,var(--cut) 14%,transparent)}
   .muted{color:var(--muted)}
   .hint{font-size:13px;color:var(--muted)}
   .stats{display:flex;gap:18px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
   .stats b{display:block;font-size:18px}
   #status{font-size:13px;color:var(--muted);min-height:18px}
   kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:12px}
+  .add{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+  .add label{display:flex;flex-direction:column;gap:3px}
+  input[type=text]{font-size:16px} /* brak auto-zoomu na iOS */
+  .tablewrap{overflow-x:auto}
+  @media (max-width:600px){
+    .wrap{padding:10px}
+    .time{font-size:18px;min-width:0;flex:1 1 100%}
+    .row>button,.row>label{flex:1 1 auto}
+    canvas{height:180px}
+    input.t{width:100%;min-width:0}
+    .add label{flex:1 1 40%}.add input{width:100%}.add button{flex:1 1 100%}
+    thead{display:none}
+    table,tbody,tr,td{display:block;width:100%}
+    tr{display:grid;grid-template-columns:1fr 1fr;gap:4px 8px;padding:8px 0;border-bottom:1px solid var(--line)}
+    tr td{border:0;padding:0}
+    tr td:first-child{grid-column:1/-1;font-weight:600}
+    tr td:nth-child(4){align-self:center}
+    tr td:last-child{text-align:right!important}
+  }
   [hidden]{display:none!important}
 </style>
 </head>
@@ -100,10 +120,15 @@
         <div class="grow"></div>
         <button id="clear" class="danger">Usuń wszystkie</button>
       </div>
-      <table>
+      <form id="addForm" class="add" autocomplete="off">
+        <label><span class="hint">Od (m:ss lub h:mm:ss)</span><input id="addFrom" class="t" type="text" inputmode="decimal" placeholder="0:15" required></label>
+        <label><span class="hint">Do</span><input id="addTo" class="t" type="text" inputmode="decimal" placeholder="1:30" required></label>
+        <button type="submit" class="primary">＋ Dodaj do wycięcia</button>
+      </form>
+      <div class="tablewrap"><table>
         <thead><tr><th>#</th><th>Od</th><th>Do</th><th>Długość</th><th></th></tr></thead>
         <tbody id="list"></tbody>
-      </table>
+      </table></div>
       <p id="empty" class="muted" style="margin:8px 0 0">Brak zaznaczeń.</p>
     </div>
 
@@ -367,7 +392,7 @@ function refresh(){
   regions.forEach((r,i) => {
     const tr = document.createElement('tr');
     if (r.id===selId) tr.className='sel';
-    tr.innerHTML = `<td>${i+1}</td>
+    tr.innerHTML = `<td>Fragment ${i+1}</td>
       <td><input class="t" type="text" value="${fmt(r.start)}" data-k="start"></td>
       <td><input class="t" type="text" value="${fmt(r.end)}" data-k="end"></td>
       <td>${fmt(r.end-r.start)}</td>
@@ -474,6 +499,15 @@ $('markOut').onclick = () => {
   const end = currentPos();
   if (markStart == null){ setStatus('Najpierw ustaw początek cięcia.'); return; }
   addRegion(markStart, end); markStart = null; setStatus(''); draw();
+};
+$('addForm').onsubmit = e => {
+  e.preventDefault();
+  const a = parseT($('addFrom').value), b = parseT($('addTo').value);
+  if (isNaN(a) || isNaN(b)) { setStatus('Wpisz czas w formacie m:ss, np. 1:25 albo 1:25.5'); return; }
+  if (Math.abs(b - a) < 0.05) { setStatus('Początek i koniec są zbyt blisko siebie.'); return; }
+  if (Math.min(a,b) >= buffer.duration) { setStatus(`Nagranie trwa tylko ${fmt(buffer.duration)}.`); return; }
+  addRegion(a, b); setStatus('');
+  $('addFrom').value = ''; $('addTo').value = ''; draw();
 };
 $('clear').onclick = () => { regions = []; selId = null; refresh(); draw(); };
 $('prev').onclick = () => { play(pos, true); };
