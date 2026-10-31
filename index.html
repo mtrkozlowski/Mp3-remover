@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Edytor nagrań</title>
+<style>
+  :root{
+    --bg:#14161a; --panel:#1d2026; --panel2:#252932; --line:#333845; --text:#e8eaf0; --muted:#8b92a3;
+    --accent:#4da3ff; --cut:#ff4d5e; --wave:#5fd0a0; --ok:#3ecf8e;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f3f4f7; --panel:#fff; --panel2:#eceef3; --line:#d5d9e2; --text:#1b1f27; --muted:#667085; --accent:#1a73e8; --cut:#d92d3f; --wave:#1e9d6b; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  .wrap{max-width:1100px;margin:0 auto;padding:16px}
+  h1{font-size:18px;margin:0 0 12px;font-weight:600}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px}
+  button,.btn{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font:inherit;cursor:pointer}
+  button:hover:not(:disabled),.btn:hover{border-color:var(--accent)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.danger{color:var(--cut)}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .grow{flex:1}
+  .time{font-variant-numeric:tabular-nums;font-size:22px;font-weight:600;min-width:150px}
+  .time small{color:var(--muted);font-size:14px;font-weight:400}
+  #drop{border:2px dashed var(--line);border-radius:10px;padding:40px 16px;text-align:center;color:var(--muted)}
+  #drop.over{border-color:var(--accent);color:var(--text)}
+  #wavebox{position:relative;background:var(--panel2);border-radius:8px;overflow:hidden;touch-action:none}
+  canvas{display:block;width:100%;height:220px;cursor:crosshair}
+  #scroll{width:100%;margin:8px 0 0}
+  label{color:var(--muted);font-size:13px}
+  select,input[type=text]{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:5px 7px;font:inherit}
+  input.t{width:92px;font-variant-numeric:tabular-nums}
+  table{width:100%;border-collapse:collapse}
+  td,th{padding:6px 4px;text-align:left;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:500;font-size:13px}
+  tr.sel td{background:color-mix(in srgb,var(--cut) 14%,transparent)}
+  .muted{color:var(--muted)}
+  .hint{font-size:13px;color:var(--muted)}
+  .stats{display:flex;gap:18px;flex-wrap:wrap;font-variant-numeric:tabular-nums}
+  .stats b{display:block;font-size:18px}
+  #status{font-size:13px;color:var(--muted);min-height:18px}
+  kbd{background:var(--panel2);border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:12px}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎙️ Edytor nagrań z dyktafonu</h1>
+
+  <div id="drop" class="card">
+    <p style="margin:0 0 10px">Przeciągnij tu plik audio (MP3, M4A, WAV, OGG…) albo</p>
+    <label class="btn" style="color:var(--text)">Wybierz plik<input id="file" type="file" accept="audio/*,.m4a,.mp3,.wav,.ogg,.aac,.amr,.3gp" hidden></label>
+    <p class="hint" style="margin:10px 0 0">Wszystko dzieje się lokalnie w przeglądarce – plik nigdzie nie jest wysyłany.</p>
+  </div>
+
+  <div id="editor" hidden>
+    <div class="card">
+      <div class="row" style="margin-bottom:10px">
+        <button id="play" class="primary" style="min-width:96px">▶ Odtwórz</button>
+        <button id="stop">■ Stop</button>
+        <button id="back" title="Do tyłu 5 s (←)">⏪ 5 s</button>
+        <button id="fwd" title="Do przodu 5 s (→)">5 s ⏩</button>
+        <div class="time" id="time">0:00.0 <small>/ 0:00.0</small></div>
+        <div class="grow"></div>
+        <label>Prędkość
+          <select id="rate">
+            <option value="0.5">0.5×</option><option value="0.75">0.75×</option>
+            <option value="1" selected>1×</option><option value="1.25">1.25×</option>
+            <option value="1.5">1.5×</option><option value="2">2×</option>
+          </select>
+        </label>
+        <label><input id="skip" type="checkbox" checked> pomijaj wycinane</label>
+      </div>
+
+      <div id="wavebox"><canvas id="cv"></canvas></div>
+      <input id="scroll" type="range" min="0" max="1000" value="0">
+
+      <div class="row" style="margin-top:8px">
+        <button id="zin">＋ Przybliż</button>
+        <button id="zout">－ Oddal</button>
+        <button id="zall">Całość</button>
+        <div class="grow"></div>
+        <button id="markIn" title="Klawisz I">[ Początek cięcia tu</button>
+        <button id="markOut" title="Klawisz O">Koniec cięcia tu ]</button>
+      </div>
+      <p class="hint" style="margin:8px 0 0">
+        <b>Przeciągnij po fali</b>, aby zaznaczyć fragment do wycięcia (czerwony). Klik = ustaw kursor. Krawędzie zaznaczenia można przeciągać.
+        Skróty: <kbd>Spacja</kbd> odtwarzanie, <kbd>I</kbd>/<kbd>O</kbd> początek/koniec cięcia, <kbd>Del</kbd> usuń zaznaczenie,
+        <kbd>←</kbd><kbd>→</kbd> ±5 s, <kbd>Ctrl</kbd>+kółko zoom.
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="row" style="margin-bottom:6px">
+        <strong>Fragmenty do wycięcia</strong>
+        <div class="grow"></div>
+        <button id="clear" class="danger">Usuń wszystkie</button>
+      </div>
+      <table>
+        <thead><tr><th>#</th><th>Od</th><th>Do</th><th>Długość</th><th></th></tr></thead>
+        <tbody id="list"></tbody>
+      </table>
+      <p id="empty" class="muted" style="margin:8px 0 0">Brak zaznaczeń.</p>
+    </div>
+
+    <div class="card">
+      <div class="stats" style="margin-bottom:12px">
+        <div><span class="muted">Oryginał</span><b id="sOrig">–</b></div>
+        <div><span class="muted">Wycięte</span><b id="sCut">–</b></div>
+        <div><span class="muted">Wynik</span><b id="sRes">–</b></div>
+      </div>
+      <div class="row">
+        <button id="prev">▶ Odsłuchaj wynik (od kursora)</button>
+        <div class="grow"></div>
+        <label>Format
+          <select id="fmt"><option value="mp3">MP3</option><option value="wav">WAV</option></select>
+        </label>
+        <label>Jakość MP3
+          <select id="kbps"><option>64</option><option>96</option><option selected>128</option><option>192</option><option>256</option></select> kbps
+        </label>
+        <button id="export" class="primary">⬇ Wyeksportuj</button>
+      </div>
+      <div id="status"></div>
+    </div>
+    <button id="other" class="muted">Wczytaj inny plik</button>
+  </div>
+</div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const AC = window.AudioContext || window.webkitAudioContext;
+const ctx = new AC();
+
+let buffer = null, fileName = 'nagranie';
+let regions = [];            // {id,start,end} w sekundach, posortowane, bez nakładania
+let selId = null, nextId = 1;
+let view = {start:0, dur:1}; // widoczne okno
+let pos = 0;                 // pozycja kursora (s)
+let playing = false, src = null, startedAt = 0, startPos = 0;
+let peaks = null;            // Float32 [min,max] na blok
+const BLOCK = 256;
+let drag = null;             // stan przeciągania myszą
+
+// ---------- narzędzia ----------
+const fmt = (t, tenths=true) => {
+  if (!isFinite(t)) t = 0;
+  t = Math.max(0, t);
+  const h = Math.floor(t/3600), m = Math.floor(t%3600/60), s = t%60;
+  const ss = tenths ? s.toFixed(1).padStart(4,'0') : String(Math.floor(s)).padStart(2,'0');
+  return (h ? h+':'+String(m).padStart(2,'0') : m) + ':' + ss;
+};
+const parseT = str => {
+  const p = String(str).trim().replace(',', '.').split(':').map(Number);
+  if (p.some(isNaN)) return NaN;
+  return p.reduce((a,v) => a*60+v, 0);
+};
+const clamp = (v,a,b) => Math.min(b, Math.max(a, v));
+const rate = () => parseFloat($('rate').value);
+
+// ---------- wczytywanie ----------
+async function loadFile(f){
+  if (!f) return;
+  setStatus('Dekodowanie pliku…');
+  try{
+    stop();
+    const ab = await f.arrayBuffer();
+    buffer = await new Promise((res, rej) => ctx.decodeAudioData(ab, res, rej));
+  }catch(e){
+    setStatus('');
+    alert('Nie udało się odczytać tego pliku audio w przeglądarce.');
+    return;
+  }
+  fileName = f.name.replace(/\.[^.]+$/, '');
+  regions = []; selId = null; pos = 0;
+  buildPeaks();
+  view = {start:0, dur:buffer.duration};
+  $('drop').hidden = true; $('editor').hidden = false;
+  setStatus('');
+  refresh();
+  requestAnimationFrame(draw);
+}
+
+function buildPeaks(){
+  const n = buffer.length, blocks = Math.ceil(n/BLOCK), ch = buffer.numberOfChannels;
+  peaks = new Float32Array(blocks*2);
+  const data = [...Array(ch)].map((_,i) => buffer.getChannelData(i));
+  for (let b=0; b<blocks; b++){
+    let mn=1, mx=-1;
+    const s=b*BLOCK, e=Math.min(n, s+BLOCK);
+    for (let c=0;c<ch;c++){ const d=data[c]; for (let i=s;i<e;i++){ const v=d[i]; if(v<mn)mn=v; if(v>mx)mx=v; } }
+    peaks[b*2]=mn; peaks[b*2+1]=mx;
+  }
+}
+
+// ---------- regiony ----------
+function normalize(){
+  regions = regions.filter(r => r.end - r.start > 0.01).sort((a,b) => a.start-b.start);
+  const out = [];
+  for (const r of regions){
+    const last = out[out.length-1];
+    if (last && r.start <= last.end){
+      last.end = Math.max(last.end, r.end);
+      if (selId === r.id) selId = last.id;
+    } else out.push(r);
+  }
+  regions = out;
+}
+function addRegion(a,b){
+  const lo = clamp(Math.min(a,b), 0, buffer.duration), hi = clamp(Math.max(a,b), 0, buffer.duration);
+  if (hi-lo < 0.05) return;
+  const r = {id:nextId++, start:lo, end:hi};
+  regions.push(r); selId = r.id;
+  normalize(); refresh();
+}
+const cutTotal = () => regions.reduce((s,r) => s + r.end-r.start, 0);
+
+// ---------- odtwarzanie ----------
+function currentPos(){
+  return playing ? startPos + (ctx.currentTime - startedAt) * rate() : pos;
+}
+function play(from, previewMode){
+  if (!buffer) return;
+  ctx.resume();
+  killSource();
+  if (from == null) from = pos;
+  if (from >= buffer.duration - 0.01) from = 0;
+  // jeśli startujemy w wycinanym fragmencie i pomijamy – przeskocz na jego koniec
+  if ($('skip').checked || previewMode){
+    const r = regions.find(r => from >= r.start && from < r.end);
+    if (r) from = r.end;
+  }
+  src = ctx.createBufferSource();
+  src.buffer = buffer;
+  src.playbackRate.value = rate();
+  src.connect(ctx.destination);
+  startPos = from; startedAt = ctx.currentTime; pos = from;
+  src.start(0, from);
+  playing = true;
+  $('play').textContent = '⏸ Pauza';
+  requestAnimationFrame(tick);
+}
+function killSource(){
+  if (src){ try{ src.onended=null; src.stop(); }catch(e){} src.disconnect(); src=null; }
+}
+function pause(){
+  if (!playing) return;
+  pos = currentPos();
+  killSource(); playing = false;
+  $('play').textContent = '▶ Odtwórz';
+}
+function stop(){
+  pause(); pos = 0; if (buffer) { ensureVisible(); draw(); updateTime(); }
+}
+function seek(t){
+  t = clamp(t, 0, buffer.duration);
+  if (playing) play(t); else pos = t;
+  draw(); updateTime();
+}
+function tick(){
+  if (!playing) return;
+  let p = currentPos();
+  if (p >= buffer.duration){ pause(); pos = buffer.duration; draw(); updateTime(); return; }
+  if ($('skip').checked){
+    const r = regions.find(r => p >= r.start && p < r.end);
+    if (r){ if (r.end >= buffer.duration - 0.01){ pause(); pos = 0; draw(); updateTime(); return; } play(r.end); p = r.end; }
+  }
+  pos = p;
+  ensureVisible(true);
+  draw(); updateTime();
+  requestAnimationFrame(tick);
+}
+function ensureVisible(follow){
+  if (pos < view.start || pos > view.start + view.dur){
+    view.start = clamp(pos - view.dur*0.1, 0, Math.max(0, buffer.duration - view.dur));
+    syncScroll();
+  } else if (follow && pos > view.start + view.dur*0.95){
+    view.start = clamp(pos - view.dur*0.1, 0, Math.max(0, buffer.duration - view.dur));
+    syncScroll();
+  }
+}
+
+// ---------- rysowanie ----------
+const cv = $('cv'), g = cv.getContext('2d');
+function resize(){
+  const r = cv.getBoundingClientRect(), d = window.devicePixelRatio||1;
+  cv.width = Math.round(r.width*d); cv.height = Math.round(r.height*d);
+}
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const t2x = t => (t - view.start) / view.dur * cv.width;
+const x2t = x => view.start + x / cv.width * view.dur;
+
+function draw(){
+  if (!buffer || $('editor').hidden) return;
+  if (!cv.width) resize();
+  const W = cv.width, H = cv.height, mid = H/2, d = window.devicePixelRatio||1;
+  g.clearRect(0,0,W,H);
+  // siatka czasu
+  g.font = `${11*d}px system-ui`; g.fillStyle = css('--muted'); g.strokeStyle = css('--line'); g.lineWidth = 1;
+  const steps = [0.1,0.2,0.5,1,2,5,10,15,30,60,120,300,600,1800,3600];
+  const step = steps.find(s => s/view.dur*W > 90) || 3600;
+  for (let t = Math.ceil(view.start/step)*step; t < view.start+view.dur; t += step){
+    const x = Math.round(t2x(t)) + .5;
+    g.beginPath(); g.moveTo(x,0); g.lineTo(x,H); g.stroke();
+    g.fillText(fmt(t, step<1), x+4, 12*d);
+  }
+  // fala
+  const sr = buffer.sampleRate, spp = view.dur*sr/W;
+  g.fillStyle = css('--wave');
+  const raw = buffer.getChannelData(0);
+  for (let x=0; x<W; x++){
+    const s0 = Math.floor((view.start + x/W*view.dur)*sr), s1 = Math.max(s0+1, Math.floor((view.start + (x+1)/W*view.dur)*sr));
+    if (s0 >= buffer.length) break;
+    let mn=1, mx=-1;
+    if (spp <= BLOCK){
+      for (let i=s0;i<Math.min(s1,buffer.length);i++){ const v=raw[i]; if(v<mn)mn=v; if(v>mx)mx=v; }
+    } else {
+      const b0=Math.floor(s0/BLOCK), b1=Math.min(Math.ceil(s1/BLOCK), peaks.length/2);
+      for (let b=b0;b<b1;b++){ if(peaks[b*2]<mn)mn=peaks[b*2]; if(peaks[b*2+1]>mx)mx=peaks[b*2+1]; }
+    }
+    if (mn > mx) continue;
+    const y0 = mid - mx*mid*0.95, y1 = mid - mn*mid*0.95;
+    g.fillRect(x, y0, 1, Math.max(1, y1-y0));
+  }
+  // regiony
+  const all = drag && drag.type==='new' ? [...regions, {id:-1,start:Math.min(drag.t0,drag.t1),end:Math.max(drag.t0,drag.t1)}] : regions;
+  for (const r of all){
+    const x0 = t2x(r.start), x1 = t2x(r.end);
+    if (x1 < 0 || x0 > W) continue;
+    g.fillStyle = css('--cut'); g.globalAlpha = r.id===selId ? .38 : .25;
+    g.fillRect(x0, 0, x1-x0, H);
+    g.globalAlpha = 1; g.fillRect(x0-1*d, 0, 2*d, H); g.fillRect(x1-1*d, 0, 2*d, H);
+  }
+  // kursor
+  const px = t2x(pos);
+  if (px >= 0 && px <= W){
+    g.fillStyle = css('--accent'); g.fillRect(px-1*d, 0, 2*d, H);
+    g.beginPath(); g.moveTo(px-6*d,0); g.lineTo(px+6*d,0); g.lineTo(px,9*d); g.fill();
+  }
+}
+
+function updateTime(){
+  $('time').innerHTML = `${fmt(pos)} <small>/ ${fmt(buffer.duration)}</small>`;
+}
+function syncScroll(){
+  const max = buffer.duration - view.dur;
+  $('scroll').disabled = max <= 0.001;
+  $('scroll').value = max <= 0.001 ? 0 : Math.round(view.start/max*1000);
+}
+function zoom(factor, anchorT){
+  const minDur = 0.05;
+  const nd = clamp(view.dur*factor, minDur, buffer.duration);
+  if (anchorT == null) anchorT = view.start + view.dur/2;
+  const frac = (anchorT - view.start)/view.dur;
+  view.dur = nd;
+  view.start = clamp(anchorT - frac*nd, 0, Math.max(0, buffer.duration - nd));
+  syncScroll(); draw();
+}
+
+// ---------- lista i podsumowanie ----------
+function refresh(){
+  const tb = $('list'); tb.innerHTML = '';
+  regions.forEach((r,i) => {
+    const tr = document.createElement('tr');
+    if (r.id===selId) tr.className='sel';
+    tr.innerHTML = `<td>${i+1}</td>
+      <td><input class="t" type="text" value="${fmt(r.start)}" data-k="start"></td>
+      <td><input class="t" type="text" value="${fmt(r.end)}" data-k="end"></td>
+      <td>${fmt(r.end-r.start)}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <button data-a="go">Idź</button> <button data-a="del" class="danger">Usuń</button></td>`;
+    tr.onclick = e => { if (e.target.tagName!=='INPUT' && e.target.tagName!=='BUTTON'){ selId=r.id; refresh(); draw(); } };
+    tr.querySelectorAll('input').forEach(inp => inp.onchange = () => {
+      const v = parseT(inp.value);
+      if (!isNaN(v)){ r[inp.dataset.k] = clamp(v, 0, buffer.duration); if (r.start>r.end) [r.start,r.end]=[r.end,r.start]; normalize(); }
+      refresh(); draw();
+    });
+    tr.querySelector('[data-a=go]').onclick = () => { selId=r.id; view.start = clamp(r.start - view.dur*0.1, 0, Math.max(0,buffer.duration-view.dur)); syncScroll(); seek(r.start); refresh(); };
+    tr.querySelector('[data-a=del]').onclick = () => { regions = regions.filter(x => x!==r); if(selId===r.id) selId=null; refresh(); draw(); };
+    tb.appendChild(tr);
+  });
+  $('empty').hidden = regions.length > 0;
+  $('clear').disabled = !regions.length;
+  const cut = cutTotal();
+  $('sOrig').textContent = fmt(buffer.duration);
+  $('sCut').textContent = fmt(cut);
+  $('sRes').textContent = fmt(buffer.duration - cut);
+  $('prev').disabled = $('export').disabled = false;
+  syncScroll(); updateTime();
+}
+function setStatus(s){ $('status').textContent = s; }
+
+// ---------- mysz / dotyk ----------
+function evX(e){ const r = cv.getBoundingClientRect(); return (e.clientX - r.left) / r.width * cv.width; }
+cv.addEventListener('pointerdown', e => {
+  if (!buffer) return;
+  cv.setPointerCapture(e.pointerId);
+  const x = evX(e), t = x2t(x), d = window.devicePixelRatio||1, tol = 7*d;
+  // krawędź istniejącego regionu?
+  for (const r of regions){
+    if (Math.abs(x - t2x(r.start)) < tol){ selId=r.id; drag={type:'edge', r, k:'start', moved:false}; return; }
+    if (Math.abs(x - t2x(r.end)) < tol){ selId=r.id; drag={type:'edge', r, k:'end', moved:false}; return; }
+  }
+  drag = {type:'new', t0:t, t1:t, x0:x, moved:false};
+});
+cv.addEventListener('pointermove', e => {
+  if (!buffer) return;
+  const x = evX(e), t = clamp(x2t(x), 0, buffer.duration), d = window.devicePixelRatio||1;
+  if (!drag){
+    const near = regions.some(r => Math.abs(x-t2x(r.start))<7*d || Math.abs(x-t2x(r.end))<7*d);
+    cv.style.cursor = near ? 'ew-resize' : 'crosshair';
+    return;
+  }
+  if (drag.type==='new'){ drag.t1 = t; if (Math.abs(x-drag.x0) > 3*d) drag.moved = true; }
+  else { drag.r[drag.k] = t; drag.moved = true; }
+  draw();
+});
+cv.addEventListener('pointerup', e => {
+  if (!drag) return;
+  const dr = drag; drag = null;
+  if (dr.type==='new'){
+    if (dr.moved) addRegion(dr.t0, dr.t1);
+    else {
+      const t = clamp(dr.t0, 0, buffer.duration);
+      const hit = regions.find(r => t>=r.start && t<=r.end);
+      selId = hit ? hit.id : null;
+      seek(t); refresh();
+    }
+  } else {
+    if (dr.r.start > dr.r.end) [dr.r.start, dr.r.end] = [dr.r.end, dr.r.start];
+    normalize(); refresh();
+  }
+  draw();
+});
+cv.addEventListener('wheel', e => {
+  if (!buffer) return;
+  e.preventDefault();
+  if (e.ctrlKey || e.metaKey){
+    const x = evX(e);
+    zoom(e.deltaY > 0 ? 1.25 : 0.8, x2t(x));
+  } else {
+    const dx = (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY);
+    view.start = clamp(view.start + dx/500*view.dur, 0, Math.max(0, buffer.duration - view.dur));
+    syncScroll(); draw();
+  }
+}, {passive:false});
+
+// ---------- przyciski ----------
+$('file').onchange = e => loadFile(e.target.files[0]);
+const dz = $('drop');
+['dragenter','dragover'].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); dz.classList.add('over'); }));
+['dragleave','drop'].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('over'); }));
+document.addEventListener('drop', e => loadFile(e.dataTransfer.files[0]));
+$('other').onclick = () => { stop(); buffer = null; $('editor').hidden = true; $('drop').hidden = false; $('file').value=''; };
+
+$('play').onclick = () => playing ? pause() : play();
+$('stop').onclick = stop;
+$('back').onclick = () => seek(currentPos() - 5);
+$('fwd').onclick = () => seek(currentPos() + 5);
+$('rate').onchange = () => { if (playing) play(currentPos()); };
+$('zin').onclick = () => zoom(0.5);
+$('zout').onclick = () => zoom(2);
+$('zall').onclick = () => { view = {start:0, dur:buffer.duration}; syncScroll(); draw(); };
+$('scroll').oninput = e => {
+  view.start = e.target.value/1000 * Math.max(0, buffer.duration - view.dur); draw();
+};
+let markStart = null;
+$('markIn').onclick = () => { markStart = currentPos(); setStatus(`Początek cięcia: ${fmt(markStart)} – ustaw kursor na końcu i kliknij „Koniec cięcia”.`); };
+$('markOut').onclick = () => {
+  const end = currentPos();
+  if (markStart == null){ setStatus('Najpierw ustaw początek cięcia.'); return; }
+  addRegion(markStart, end); markStart = null; setStatus(''); draw();
+};
+$('clear').onclick = () => { regions = []; selId = null; refresh(); draw(); };
+$('prev').onclick = () => { play(pos, true); };
+
+document.addEventListener('keydown', e => {
+  if (!buffer || $('editor').hidden || /INPUT|SELECT|TEXTAREA/.test(e.target.tagName) && e.target.type!=='checkbox' && e.target.type!=='range') return;
+  if (e.code==='Space'){ e.preventDefault(); playing ? pause() : play(); }
+  else if (e.code==='KeyI') $('markIn').click();
+  else if (e.code==='KeyO') $('markOut').click();
+  else if (e.code==='Delete' || e.code==='Backspace'){ if (selId!=null){ regions = regions.filter(r => r.id!==selId); selId=null; refresh(); draw(); } }
+  else if (e.code==='ArrowLeft'){ e.preventDefault(); seek(currentPos() - (e.shiftKey?1:5)); }
+  else if (e.code==='ArrowRight'){ e.preventDefault(); seek(currentPos() + (e.shiftKey?1:5)); }
+});
+window.addEventListener('resize', () => { resize(); draw(); });
+
+// ---------- eksport ----------
+function keepSegments(){
+  const segs = []; let cur = 0;
+  for (const r of regions){ if (r.start > cur) segs.push([cur, r.start]); cur = r.end; }
+  if (cur < buffer.duration) segs.push([cur, buffer.duration]);
+  return segs;
+}
+function render(){
+  const sr = buffer.sampleRate, nch = Math.min(2, buffer.numberOfChannels);
+  const segs = keepSegments().map(([a,b]) => [Math.round(a*sr), Math.min(buffer.length, Math.round(b*sr))]).filter(s => s[1]>s[0]);
+  const total = segs.reduce((s,x) => s + x[1]-x[0], 0);
+  const out = [...Array(nch)].map(() => new Float32Array(total));
+  const fade = Math.round(sr*0.004); // 4 ms – bez trzasków na łączeniach
+  let o = 0;
+  segs.forEach(([a,b], si) => {
+    for (let c=0;c<nch;c++){
+      const d = buffer.getChannelData(c), dst = out[c];
+      dst.set(d.subarray(a,b), o);
+      const n = Math.min(fade, (b-a)>>1);
+      if (si > 0) for (let i=0;i<n;i++) dst[o+i] *= i/n;
+      if (si < segs.length-1) for (let i=0;i<n;i++) dst[o+(b-a)-1-i] *= i/n;
+    }
+    o += b-a;
+  });
+  return {data: out, sr, nch, total};
+}
+const to16 = f => { const v = Math.max(-1, Math.min(1, f)); return v<0 ? v*32768 : v*32767; };
+
+function encodeWav({data, sr, nch, total}){
+  const bytes = 44 + total*nch*2, view = new DataView(new ArrayBuffer(bytes));
+  const w = (o,s) => [...s].forEach((ch,i) => view.setUint8(o+i, ch.charCodeAt(0)));
+  w(0,'RIFF'); view.setUint32(4, bytes-8, true); w(8,'WAVE'); w(12,'fmt ');
+  view.setUint32(16,16,true); view.setUint16(20,1,true); view.setUint16(22,nch,true);
+  view.setUint32(24,sr,true); view.setUint32(28,sr*nch*2,true); view.setUint16(32,nch*2,true); view.setUint16(34,16,true);
+  w(36,'data'); view.setUint32(40, total*nch*2, true);
+  let o = 44;
+  for (let i=0;i<total;i++) for (let c=0;c<nch;c++){ view.setInt16(o, to16(data[c][i]), true); o += 2; }
+  return new Blob([view], {type:'audio/wav'});
+}
+
+function loadLame(){
+  if (window.lamejs) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js';
+    s.onload = res; s.onerror = () => rej(new Error('lamejs'));
+    document.head.appendChild(s);
+  });
+}
+async function encodeMp3({data, sr, nch, total}, kbps){
+  await loadLame();
+  const enc = new lamejs.Mp3Encoder(nch, sr, kbps), parts = [], CH = 1152;
+  const cvt = (arr, a, b) => { const o = new Int16Array(b-a); for (let i=a;i<b;i++) o[i-a] = to16(arr[i]); return o; };
+  for (let i=0;i<total;i+=CH){
+    const b = Math.min(total, i+CH);
+    const buf = nch===1 ? enc.encodeBuffer(cvt(data[0],i,b)) : enc.encodeBuffer(cvt(data[0],i,b), cvt(data[1],i,b));
+    if (buf.length) parts.push(new Uint8Array(buf));
+    if ((i/CH) % 400 === 0){ setStatus(`Kodowanie MP3… ${Math.round(i/total*100)}%`); await new Promise(r => setTimeout(r)); }
+  }
+  const end = enc.flush(); if (end.length) parts.push(new Uint8Array(end));
+  return new Blob(parts, {type:'audio/mpeg'});
+}
+function download(blob, name){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+$('export').onclick = async () => {
+  pause();
+  const btn = $('export'); btn.disabled = true;
+  try{
+    setStatus('Składanie nagrania…'); await new Promise(r => setTimeout(r, 20));
+    const r = render();
+    if (!r.total){ setStatus('Wszystko jest zaznaczone do wycięcia – nie ma czego eksportować.'); return; }
+    let blob, ext = $('fmt').value;
+    if (ext === 'mp3'){
+      try{ blob = await encodeMp3(r, +$('kbps').value); }
+      catch(e){ ext = 'wav'; setStatus('Brak dostępu do enkodera MP3 (potrzebny internet) – eksportuję jako WAV.'); blob = encodeWav(r); }
+    } else blob = encodeWav(r);
+    download(blob, `${fileName}-edit.${ext}`);
+    setStatus(`Gotowe: ${fileName}-edit.${ext} (${(blob.size/1048576).toFixed(1)} MB, ${fmt(r.total/r.sr)})`);
+  } finally { btn.disabled = false; }
+};
+
+// stan początkowy
+window.__editor = { get regions(){return regions;}, addRegion, render, loadFile };
+})();
+</script>
+</body>
+</html>
